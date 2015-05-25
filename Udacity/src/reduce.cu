@@ -152,7 +152,7 @@ public:
 
 void test_reduce()
 {
-	size_t size = 1<<22;
+	size_t size = 1<<20;
 	float* h_in = new float[size];
 	float h_out;
 	float h_actual = 0;

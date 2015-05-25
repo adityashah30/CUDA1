@@ -24,6 +24,6 @@ extern void test_inclusiveScan();
 int main()
 {
 	test_reduce();
-//	test_inclusiveScan();
+	test_inclusiveScan();
 	return 0;
 }
