@@ -30,28 +30,6 @@
  cudaDeviceSynchronize();                 \
  checkCudaErrors(cudaGetLastError(), b)
 
-template<typename T>
-__global__
-void copyKernel(T* out, T* in, size_t size)
-{
-	int idx = threadIdx.x + blockIdx.x*blockDim.x;
-
-	if(idx < size)
-	{
-		out[idx] = in[idx];
-	}
-}
-
-template<typename T>
-void copyDataGPU(T* out, T* in, size_t size)
-{
-	const size_t BLOCK_SIZE = 1024;
-	const size_t GRID_SIZE = (size+BLOCK_SIZE-1)/BLOCK_SIZE;
-
-	copyKernel<<<GRID_SIZE, BLOCK_SIZE>>>(out, in, size);
-	checkCudaErrorKernel("copyKernel");
-}
-
 class CudaTimer
 {
 private:

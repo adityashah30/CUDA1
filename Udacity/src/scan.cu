@@ -28,6 +28,9 @@ void inclusiveScanKernel(T* d_out, T* d_inter, T* d_in, size_t size)
 	int bid = blockIdx.x;
 	int idx = threadIdx.x + blockIdx.x*blockDim.x;
 
+	/*
+	 * Copy the data from d_in to sharedMem
+	 */
 	sharedMem[tid] = idx<size?d_in[idx]:Operator<T>::identityElem();
 	__syncthreads();
 
@@ -36,7 +39,7 @@ void inclusiveScanKernel(T* d_out, T* d_inter, T* d_in, size_t size)
 		/*
 		 * For each element add the element 2**j left to it
 		 * if it exists. Note, here `j` is the iteration count
-		 * of the algorithm. 0<=j<=log(size)
+		 * of the algorithm. 0<=j<=log(blockDim)
 		 */
 		for(int offset=1; offset<blockDim.x; offset<<=1)
 		{
@@ -47,14 +50,25 @@ void inclusiveScanKernel(T* d_out, T* d_inter, T* d_in, size_t size)
 			__syncthreads();
 		}
 
+		/*
+		 * Copy the local inclusive scan results to d_out
+		 */
+
 		d_out[idx] = sharedMem[tid];
 		__syncthreads();
 
+		/*
+		 * If the thread is the last one in the threadblock,
+		 * copy the value to d_inter.
+		 */
 		if(tid == blockDim.x - 1)
 			d_inter[bid] = sharedMem[tid];
 	}
 }
 
+/*
+ * The kernel to add d_inter[i-1] to each value of block[i]
+ */
 template<typename T, template<class> class Operator>
 __global__
 void addScannedValstoBlocks(T* d_out, T* d_inter, size_t size)
@@ -62,18 +76,35 @@ void addScannedValstoBlocks(T* d_out, T* d_inter, size_t size)
 	int bid = blockIdx.x;
 	int idx = threadIdx.x + blockIdx.x*blockDim.x;
 
+	/*
+	 * No work to be done for first block
+	 */
 	if(bid == 0)
 		return;
 
+	/*
+	 * Store value locally for efficient access.
+	 */
 	T val = d_inter[bid-1];
 
+	/*
+	 * If idx<size, d_out = d_out `op` val
+	 */
 	if(idx<size)
 		d_out[idx] = Operator<T>::apply(d_out[idx], val);
 }
 
+/*
+ * The recursive routine called to calc the inclusive scan
+ * of d_in and produce output d_out. size of d_in is size.
+ */
 template<typename T, template<class> class Operator>
 void _inclusiveScan(T* d_out, T* d_in, size_t size)
 {
+	/*
+	 * The intermediate array to store the values from last
+	 * thread of every block.
+	 */
 	T* d_inter;
 
 	/* Block size = 1024
@@ -89,11 +120,20 @@ void _inclusiveScan(T* d_out, T* d_in, size_t size)
 	inclusiveScanKernel<T, Operator><<<GRID_SIZE, BLOCK_SIZE, SHARED_MEMSIZE>>>(d_out, d_inter, d_in, size);
 	checkCudaErrorKernel("inclusiveKernel");
 
+	/*
+	 * 1 block in grid implies local inclusive scan is the answer.
+	 */
 	if(GRID_SIZE==1)
 		return;
 
+	/*
+	 * Perform inclusive scan on the d_inter array
+	 */
 	_inclusiveScan<T, Operator>(d_inter, d_inter, GRID_SIZE);
 
+	/*
+	 * Add the intermediate values to next block
+	 */
 	addScannedValstoBlocks<T, Operator><<<GRID_SIZE, BLOCK_SIZE>>>(d_out, d_inter, size);
 	checkCudaErrorKernel("addScannedValstoBlocks");
 
@@ -121,6 +161,9 @@ void inclusiveScan(T* h_out, T* h_in, size_t size)
 					"cudamemcpy h_in to d_in");
 
 
+	/*
+	 * Call the helper function to get the inclusive scan
+	 */
 	_inclusiveScan<T, Operator>(d_out, d_in, size);
 
 	/*
